@@ -1,0 +1,12 @@
+{
+  "name": "bookrover",
+  "version": "1.0.0",
+  "description": "Bookrover: RAG recommendation engine for creating novel reading lists",
+  "main": "webserver/src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "scraper": ".venv/bin/python scraper/src/main.py"
+  },
+  "author": "Patrick Reding",
+  "license": "ISC"
+}
