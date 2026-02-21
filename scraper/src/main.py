@@ -30,8 +30,8 @@ STOP_WORDS = set([
     "a", "about", "above", "after", "again", "against", "ain", "ain't",
     "all", "am", "an", "and", "any", "are", "aren", "aren't",
     "as", "at", "be", "because", "been", "before", "being", 
-    "below", "between", "both", "but", "by", "can", "couldnt", "couldn't",
-    "d", "did", "didn", "didn't", "do", "does", "doesnt", "doesn't",
+    "below", "between", "both", "but", "by", "can", "could", "couldn", "couldn't",
+    "d", "did", "didn", "didn't", "do", "does", "doesn", "doesn't",
     "doing", "dont", "don't", "down", "during", "each", "few", "for",
     "from", "further", "had", "hadn", "hadn't", "has", "hasn",
     "hasn't", "have", "haven", "haven't", "having", "he", "he'd",
@@ -54,19 +54,15 @@ STOP_WORDS = set([
     "while", "who", "whom", "why", "will", "with", "won", "won't",
     "wouldn", "wouldn't", "y", "you", "you'd", "you'll", "you're",
     "you've", "your", "yours", "yourself", "yourselves",
-    "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
-    "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+    "b", "c", "d", "e", "f", "g", "h", "j", "k", "l", "m",
+    "n", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
     "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"
 ])
 
 def reset_database() -> None:
-    username = loadenv.loadEnvVariable("POSTGRES_USERNAME")
-    password = loadenv.loadEnvVariable("POSTGRES_PASSWORD")
-    host = loadenv.loadEnvVariable("POSTGRES_HOST")
-    port = loadenv.loadEnvVariable("POSTGRES_PORT")
     model_dimensions = int(loadenv.loadEnvVariable("EMBEDDING_DIMENSIONS"))
     
-    with psycopg.connect(f'user={username} password={password} host={host} port={port} dbname=bookrover') as conn:
+    with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
             cur.execute("DROP TABLE IF EXISTS populate_books_progress")
@@ -238,16 +234,12 @@ def reset_database() -> None:
     
 
 def addBooksToDatabase(response: dict, ignore_last_updated: bool = False) -> None:
-    username = loadenv.loadEnvVariable("POSTGRES_USERNAME")
-    password = loadenv.loadEnvVariable("POSTGRES_PASSWORD")
-    host = loadenv.loadEnvVariable("POSTGRES_HOST")
-    port = loadenv.loadEnvVariable("POSTGRES_PORT")
-    
+  
     if "data" not in response or "books" not in response["data"]:
         print(f"Unexpected API response format. Response: {response}")
         raise JSONDecodeError("Unexpected API response format", str(response), 0)
 
-    with psycopg.connect(f'user={username} password={password} host={host} port={port} dbname=bookrover') as conn:
+    with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
         with conn.cursor() as cur:
             cur = conn.cursor(row_factory=rows.dict_row)
             for book in response["data"]["books"]:
@@ -263,6 +255,7 @@ def addBooksToDatabase(response: dict, ignore_last_updated: bool = False) -> Non
                 # Fetch existing book data from the database, if it exists, to check if
                 # we need to update the record. The old entry is also need to update the
                 # inverted index if the book's metadata has changed significantly.
+                print(f"{hardcover_id=}")
                 cur.execute(sql.SQL("SELECT * FROM books WHERE hardcover_id = %s"), (hardcover_id,))
                 existing_book = cur.fetchone()
                 if existing_book and not ignore_last_updated:
@@ -271,7 +264,7 @@ def addBooksToDatabase(response: dict, ignore_last_updated: bool = False) -> Non
                     # changed much in that time.
                     existing_updated_at = existing_book["updated_at"]
                     if existing_updated_at and (datetime.now(timezone.utc) - existing_updated_at).days < 7:
-                        print(f"Book with Hardcover ID {hardcover_id} already exists in the database and is up to date. Skipping.")
+                        print(f'Book "{existing_book["title"]}" ({hardcover_id}) already exists in the database and is up to date. Skipping.')
                         continue
 
                 # Extract relevant fields from the API response
@@ -280,7 +273,7 @@ def addBooksToDatabase(response: dict, ignore_last_updated: bool = False) -> Non
                 average_rating = book["rating"]
 
                 if not book["contributions"]:
-                    print(f"Book with Hardcover ID {hardcover_id} has no contributors data. Skipping.")
+                    print(f'Book "{title}" ({hardcover_id}) has no contributors data. Skipping.')
                     continue
                 authors: list[str] = []
                 for contributor in book["contributions"]:
@@ -291,11 +284,14 @@ def addBooksToDatabase(response: dict, ignore_last_updated: bool = False) -> Non
                 num_good_ratings = sum([rating["count"] for rating in book["ratings_distribution"] if rating["rating"] >= 3.5])
 
                 if not book["editions"]:
-                    print(f"Book with Hardcover ID {hardcover_id} has no editions. Skipping.")
+                    print(f'Book "{title}" ({hardcover_id}) has no editions. Skipping.')
                     continue
                 first_edition = book["editions"][0]
                 isbn_13 = re.sub(r"[^0-9]", "", first_edition["isbn_13"])
                 release_date = book["release_date"]
+                if "BC" in release_date:    # psycopg freaks out if the release date is
+                                            # before 1 CE. Sorry, Homer.
+                    release_date = "0001-01-01"
                 language_set: set[str] = set()
                 for edition in book["editions"]:
                     if edition != None and edition["language"] != None and edition["language"]["code3"] != None:
@@ -418,6 +414,9 @@ def updateInvertedIndex(cur, new_book: dict, existing_book: dict | None) -> None
             # stem the remaining words.
             keywords = re.findall(r"\w+", field_items.lower())
             tokens_in_new_book[field] = [stemmer.stem(keyword) for keyword in keywords if keyword not in STOP_WORDS]
+        else:   
+            # If it's not a list or a string, then the field is probably None.
+            tokens_in_new_book[field] = []
 
     if not existing_book:
         tokens_in_old_book = {field: [] for field in fields}
@@ -486,10 +485,6 @@ def populateDatabase(genres: list[str] | str | None = None) -> None:
 
     api_url = loadenv.loadEnvVariable("HARDCOVER_API_URL")
     api_key = loadenv.loadEnvVariable("HARDCOVER_API_KEY")
-    username = loadenv.loadEnvVariable("POSTGRES_USERNAME")
-    password = loadenv.loadEnvVariable("POSTGRES_PASSWORD")
-    host = loadenv.loadEnvVariable("POSTGRES_HOST")
-    port = loadenv.loadEnvVariable("POSTGRES_PORT")
 
     for genre in genres_to_search:
         if db_size >= max_books_db_size:
@@ -497,7 +492,7 @@ def populateDatabase(genres: list[str] | str | None = None) -> None:
             break
 
         page: int
-        with psycopg.connect(f'user={username} password={password} host={host} port={port} dbname=bookrover') as conn:
+        with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
             with conn.cursor() as cur:    
                 query = sql.SQL("SELECT last_page_fetched FROM populate_books_progress WHERE genre = %s").format(sql.Identifier(genre))
                 cur.execute(query, (genre,))
@@ -620,7 +615,7 @@ def populateDatabase(genres: list[str] | str | None = None) -> None:
                 print(f"Reached the maximum number of tries ({max_repeated_pages}) without adding new books. Moving to the next genre.")
             sleep(2) # Keep being nice to the API. (They've been so nice to us!)
 
-        with psycopg.connect(f'user={username} password={password} host={host} port={port} dbname=bookrover') as conn:
+        with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
             with conn.cursor() as cur:
                 # Update the last_page_fetched for this genre
                 cur.execute("""

@@ -12,3 +12,10 @@ def loadEnvVariable(name: str) -> str:
     if value == None:
         raise EnvironmentError(f"{name} not found in environment.")
     return value
+
+def getDatabaseConnectionString() -> str:
+    username = loadEnvVariable("POSTGRES_USERNAME")
+    password = loadEnvVariable("POSTGRES_PASSWORD")
+    host = loadEnvVariable("POSTGRES_HOST")
+    port = loadEnvVariable("POSTGRES_PORT")
+    return f'user={username} password={password} host={host} port={port} dbname=bookrover'

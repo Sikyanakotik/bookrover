@@ -5,7 +5,8 @@
   "main": "webserver/src/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "scraper": ".venv/bin/python scraper/src/main.py"
+    "scraper": ".venv/bin/python scraper/src/main.py",
+    "engine": ".venv/bin/python engine/src/main.py"
   },
   "author": "Patrick Reding",
   "license": "ISC"
