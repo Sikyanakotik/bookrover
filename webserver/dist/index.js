@@ -2,13 +2,11 @@ import express from 'express';
 import path from "path";
 import * as dotenv from 'dotenv';
 import process from 'node:process';
-
-dotenv.config()
+dotenv.config();
 const app = express();
 const domain = process.env.BOOKROVER_DOMAIN;
 const port = process.env.WEBSERVER_PORT;
 const engine_port = process.env.ENGINE_PORT;
-
 const html_header = `
 <!DOCTYPE html>
 <html>
@@ -18,35 +16,29 @@ const html_header = `
     <title>Bookrover</title>
   </head>
   <body>
-`
-const html_footer = "</body></html>"
-
-
+`;
+const html_footer = "</body></html>";
 if (!port) {
-    console.log("Could not start app: WEBSERVER_PORT environment variable undefined.")
+    console.log("Could not start app: WEBSERVER_PORT environment variable undefined.");
     process.exit(1);
 }
-
 app.get("/status", (req, res) => {
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/html');
     res.send("Bookrover webserver is <b>online</b>.");
 });
-
-
 app.get("/", (req, res) => {
     res.sendFile(path.join(import.meta.dirname, '../public/index.html'));
 });
-
 app.get("/generate_loader", async (req, res) => {
-    let query = req.query.query
-    if (!query || typeof(query) != "string") {
+    let query = req.query.query;
+    if (!query || typeof (query) != "string") {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'text/html');
         res.send(`<b>Error</b>: No query provided`);
         return;
     }
-    let query_uri = new URLSearchParams({query: query})
+    let query_uri = new URLSearchParams({ query: query });
     res.setHeader('Content-Type', 'text/html');
     res.send(html_header +
         `
@@ -54,20 +46,16 @@ app.get("/generate_loader", async (req, res) => {
         <h3>This could take up to a minute.</h3>
         <script>
             window.location.replace("http://${domain}:${port}/generate_list?${query_uri.toString()}")
-        </script>` + html_footer
-    )
-})
-
-
+        </script>` + html_footer);
+});
 app.get("/list_loader", async (req, res) => {
-    let reading_list_id = req.query.reading_list_id
-    if (!reading_list_id || typeof(reading_list_id) != "string") {
+    let reading_list_id = req.query.reading_list_id;
+    if (!reading_list_id || typeof (reading_list_id) != "string") {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'text/html');
         res.send(`<b>Error</b>: No query provided`);
         return;
     }
-    
     res.setHeader('Content-Type', 'text/html');
     res.send(html_header +
         `
@@ -75,34 +63,27 @@ app.get("/list_loader", async (req, res) => {
         <h3>This should be quick, unless the API server's busy.</h3>
         <script>
             window.location.replace("http://${domain}:${port}/reading_lists/${reading_list_id}")
-        </script>` + html_footer
-    )
-})
-
-
+        </script>` + html_footer);
+});
 app.get("/generate_list", async (req, res) => {
-    let query = req.query.query
+    let query = req.query.query;
     if (!query) {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'text/html');
         res.send(`<b>Error</b>: No query provided`);
     }
-
-    const response = await fetch(
-        `http://${domain}:${engine_port}/reading_lists`,
-        {
-            method: "POST",
-            mode: "cors",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({query: query})
-        }
-    )
+    const response = await fetch(`http://${domain}:${engine_port}/reading_lists`, {
+        method: "POST",
+        mode: "cors",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ query: query })
+    });
     if (response && response.status === 200) {
         let response_data = await response.json();
         if ("reading_list_id" in response_data) {
-            let reading_list_id: string = response_data.reading_list_id;
+            let reading_list_id = response_data.reading_list_id;
             res.statusCode = 200;
             res.setHeader('Content-Type', 'text/html');
             //res.send(`${html_header}<b>Query</b>: ${req.query.query}<br><b>Response: ${await response.text()}${html_footer}`);
@@ -112,44 +93,38 @@ app.get("/generate_list", async (req, res) => {
                 <h3>This should be quick, unless the API server's busy.</h3>
                 <script>
                     window.location.replace("http://${domain}:${port}/reading_lists/${reading_list_id}");
-                </script>` + html_footer
-            )
-        } else {
+                </script>` + html_footer);
+        }
+        else {
             res.statusCode = 500;
             res.setHeader('Content-Type', 'text/html');
             res.send(`<b>Error</b>: Bad response from API server.`);
         }
-    } else {
+    }
+    else {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'text/html');
         res.send(`<b>Error</b>: API server error.`);
     }
 });
-
-
 app.get("/reading_lists/:reading_list_id", async (req, res) => {
-    let query_uri = new URLSearchParams({reading_list_id: req.params.reading_list_id})
-    const response = await fetch(
-        `http://${domain}:${engine_port}/reading_lists?${query_uri}`,
-        {
-            method: "GET",
-            mode: "cors"
-        }
-    )
+    let query_uri = new URLSearchParams({ reading_list_id: req.params.reading_list_id });
+    const response = await fetch(`http://${domain}:${engine_port}/reading_lists?${query_uri}`, {
+        method: "GET",
+        mode: "cors"
+    });
     if (response && response.status === 200) {
         //res.statusCode = 200;
         //res.setHeader('Content-Type', 'text/html');
         //res.send(html_header + (await response.text()) + html_footer);
-
         let response_data = await response.json();
-        if (!response_data || !("user_id" in response_data) || !("name" in response_data) 
+        if (!response_data || !("user_id" in response_data) || !("name" in response_data)
             || !("prompt" in response_data) || !("created_at" in response_data)
             || !("books" in response_data)) {
             res.statusCode = 500;
             res.setHeader('Content-Type', 'text/html');
             res.send(`<b>Error</b>: Bad response from API server.`);
         }
-        
         let html_body = `
             <h1 style="color:#0033aa">Bookrover</h1>
             <h3>RAG-powered fiction search engine</h3>
@@ -193,7 +168,7 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
             <h4>Prompt: ${response_data.prompt}<br />
             Created ${response_data.created_at}</h4>
         `;
-        let count: number = 1;
+        let count = 1;
         for (let book of response_data.books) {
             html_body += `
             <table style="width:80%">
@@ -237,20 +212,19 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
                     <td style="text-align:left"><b>ISBN:</b> ${book.isbn_13}</td>
                 </tr>
             </table><br />
-            `
+            `;
             count++;
         }
         res.statusCode = 200;
         res.setHeader('Content-Type', 'text/html');
         res.send(`${html_header}${html_body}${html_footer}`);
-
-    } else {
+    }
+    else {
         res.statusCode = 500;
         res.setHeader('Content-Type', 'text/html');
         res.send(`<b>Error</b>:API server error.`);
     }
 });
-
 const webserver = app.listen(port, () => {
     console.log(`Server is running at http://localhost:${port}`);
     console.log("Server listening:", webserver.address());

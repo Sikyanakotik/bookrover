@@ -1,13 +1,23 @@
 {
   "name": "bookrover",
   "version": "1.0.0",
+  "type": "module",
   "description": "Bookrover: RAG recommendation engine for creating novel reading lists",
   "main": "webserver/src/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "scraper": ".venv/bin/python scraper/src/main.py",
-    "engine": ".venv/bin/python engine/src/main.py"
+    "engine": ".venv/bin/python engine/src/main.py",
+    "serverdev": "npx tsc && node webserver/dist/index.js",
+    "webserver": "node dist/index.js"
   },
   "author": "Patrick Reding",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6"
+  }
 }

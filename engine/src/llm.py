@@ -147,6 +147,9 @@ WEAK_KEYWORD_STRENGTHS = ["positive", "negative"]
 POSITIVE_KEYWORD_STRENGTHS = ["mandatory", "positive"]
 NEGATIVE_KEYWORD_STRENGTHS = ["negative", "disqualifying"]
 
+KEYWORD_CATEGORIES = ["authors", "title", "genre", "mood", "content warnings",
+                      "description"]
+
 def LLMRequest(user_prompt:str, system_prompt:str = DEFAULT_SYSTEM_PROMPT) -> str:
     llm_type = loadenv.loadEnvVariable("LLM_TYPE")
 
@@ -225,6 +228,19 @@ def extractKeywords(user_prompt: str) -> list[dict]:
                 bad_item_found = True
                 break
             
+            if item["strength"] not in KEYWORD_STRENGTHS:
+                print(f'Keyword "{item["keyword"]}" has bad strength value "{item["strength"]}".')
+                bad_item_found = True
+                break
+
+            for category in item["categories"]:
+                if category not in KEYWORD_CATEGORIES:
+                    print(f'Keyword "{item["keyword"]}" has bad category value "{category}".')
+                    bad_item_found = True
+                    break
+            if bad_item_found:
+                break
+
             # Add canonical synonyms, and weaken the non-canonical form when found.
             for category in item["categories"]:
                 canonical_tag = keyword_synonyms.getCanonicalTag(item["keyword"], category)

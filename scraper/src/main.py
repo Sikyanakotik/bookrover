@@ -65,6 +65,8 @@ def reset_database() -> None:
     with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            cur.execute("DROP TABLE IF EXISTS reading_list_books")
+            cur.execute("DROP TABLE IF EXISTS reading_lists")
             cur.execute("DROP TABLE IF EXISTS populate_books_progress")
             cur.execute("DROP TABLE IF EXISTS book_embeddings")
             cur.execute("DROP TABLE IF EXISTS inverted_index")
@@ -230,8 +232,75 @@ def reset_database() -> None:
                 FOR EACH ROW
                 EXECUTE FUNCTION trigger_set_timestamp()
             """)
+
+            # TABLE reading_lists: Stores information on the generated reading lists.
+            #                      The reading list contents are instead stored in
+            #                      reading_list_books.
+            # Columns:
+            # - id: A unique identifier for the reading list.
+            # - user_id: The ID of the creator/owner of the reading list.
+            #            NOTE: Until we implement multiple users, this will always be 0.
+            # - name: The name of the reading list, which the user can set. Defaults to
+            #         "New List".
+            # - prompt: The text prompt used to generate the reading list.
+            # - keywords: The keywords parsed from the prompt used to generate the
+            #             reading list, in JSON format. This is mostly so we don't have
+            #             to call the LLM again when extending the list.
+            # - created_at: Timestamp of the creation of this record. Automatically
+            #               set to the current time on creation.
+            # - updated_at: Timestamp of the last update to this record. Automatically
+            #               set to the current time whenever the record is updated.
+            cur.execute("""
+                CREATE TABLE reading_lists (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id INT NOT NULL,
+                    name TEXT DEFAULT 'New List',
+                    prompt TEXT NOT NULL,
+                    keywords TEXT NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
+            cur.execute(""" 
+                CREATE TRIGGER set_timestamp
+                BEFORE UPDATE ON reading_lists
+                FOR EACH ROW
+                EXECUTE FUNCTION trigger_set_timestamp()
+            """)
+
+            # TABLE reading_list_books: Stores the books in each reading list.
+            #
+            # Columns:
+            # - id: A unique identifier for the row.
+            # - reading_list_id: The ID of the reading list in TABLE reading_lists.
+            # - book_id: The ID of the book in TABLE books.
+            # - rank: The order of the book in the reading list, starting from 1.
+            # - removed: Whether a book has been removed from the reading list,
+            #            either because it has been read or because the user doesn't
+            #            want to read it. Either way, we hold onto the entry so we
+            #            don't serve it again when the list is extended.
+            # - updated_at: Timestamp of the last update to this record. Automatically
+            #               set to the current time whenever the record is updated.
+
+            cur.execute("""
+                CREATE TABLE reading_list_books (
+                    id SERIAL PRIMARY KEY,
+                    reading_list_id UUID NOT NULL REFERENCES reading_lists(id) ON DELETE CASCADE,
+                    book_id BIGINT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                    rank INT NOT NULL,
+                    removed BOOLEAN NOT NULL DEFAULT false,
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
+            cur.execute(""" 
+                CREATE TRIGGER set_timestamp
+                BEFORE UPDATE ON reading_list_books
+                FOR EACH ROW
+                EXECUTE FUNCTION trigger_set_timestamp()
+            """)
             conn.commit()
-    
+
+
 
 def addBooksToDatabase(response: dict, ignore_last_updated: bool = False) -> None:
   
@@ -254,8 +323,7 @@ def addBooksToDatabase(response: dict, ignore_last_updated: bool = False) -> Non
 
                 # Fetch existing book data from the database, if it exists, to check if
                 # we need to update the record. The old entry is also need to update the
-                # inverted index if the book's metadata has changed significantly.
-                print(f"{hardcover_id=}")
+                # inverted index if the book's metadata has changed significantly.                
                 cur.execute(sql.SQL("SELECT * FROM books WHERE hardcover_id = %s"), (hardcover_id,))
                 existing_book = cur.fetchone()
                 if existing_book and not ignore_last_updated:
@@ -289,8 +357,8 @@ def addBooksToDatabase(response: dict, ignore_last_updated: bool = False) -> Non
                 first_edition = book["editions"][0]
                 isbn_13 = re.sub(r"[^0-9]", "", first_edition["isbn_13"])
                 release_date = book["release_date"]
-                if "BC" in release_date:    # psycopg freaks out if the release date is
-                                            # before 1 CE. Sorry, Homer.
+                if not release_date or ("BC" in release_date):
+                    # psycopg freaks out if the release date is before 1 CE. Sorry, Homer.
                     release_date = "0001-01-01"
                 language_set: set[str] = set()
                 for edition in book["editions"]:
@@ -458,7 +526,7 @@ def updateInvertedIndex(cur, new_book: dict, existing_book: dict | None) -> None
 def populateDatabase(genres: list[str] | str | None = None) -> None:
     '''
     Adds books in batches from the Hardcover API to the database, starting with the most 
-    popular books in each of ten canonical genres.
+    popular books in each of fourteen canonical genres.
 
     Don't fill the database all at once, or Hardcover will cut us off. Use the scheduler
     (once it's implemented) to add new books on a reasonable schedule.
@@ -466,7 +534,7 @@ def populateDatabase(genres: list[str] | str | None = None) -> None:
     if genres is None:
         genres_to_search = ["Fantasy", "Science Fiction", "Romance", "Thriller", "Mystery",
                             "Young Adult", "Horror", "Juvenile Fiction", "Literary",
-                            "Classics"]
+                            "Classics", "LGBTQ", "Humor", "Sports", "War"]
     elif isinstance(genres, str):
         genres_to_search = [genres]
     else:
@@ -541,8 +609,9 @@ def populateDatabase(genres: list[str] | str | None = None) -> None:
             ids: list[int] = response_json["data"]["search"]["ids"]
             if not ids:
                 print(f"No more books found for genre {genre} after page {page}. Moving to next genre.")
-                page -= 1 # Decrement page to avoid skipping pages in future runs, since we didn't
-                          # actually add any new books to the database on this page
+                page = 0 # Reset page so we start again from the beginning, updating 
+                         # older entries and maybe finding books that slipped through the
+                         # cracks.
                 sleep(2) # Keep being nice to the API.
                 break
             ids = [int(id) for id in ids] # Ensure all IDs are integers
@@ -830,8 +899,7 @@ def main() -> None:
                 print(f"Populating database with books from the following genres: {', '.join(args.genres)}")
                 populateDatabase(genres=args.genres)
             else:
-                print(f"Populating database with canonical genres:")
-                print("[Fantasy, Science Fiction, Romance, Thriller, Mystery, Young Adult, Horror, Juvenile Fiction, Literary, Classics]")
+                print(f"Populating database with canonical genres.")
                 populateDatabase()
         case "background":
             raise NotImplementedError("Background mode is not implemented yet.")
