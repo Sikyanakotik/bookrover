@@ -34,6 +34,7 @@ def fetchBookByHardcoverID(hardcover_id: str | int) -> dict | None:
             return None
         
 def fetchIdsFromII(keyword: str, field: str) -> list[int]:
+    keyword = keyword.lower()
     with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
         with conn.cursor() as cur:
             match field:

@@ -3,6 +3,7 @@ import sys
 import psycopg
 import argparse
 import flask
+import flask_cors
 import json
 from datetime import date
 from collections import defaultdict
@@ -18,6 +19,7 @@ from shared_python.src import db_queries
 from shared_python.src import embeddings
 
 server = flask.Flask(__name__)
+flask_cors.CORS(server)
 
 def json_serial(obj):
     """JSON serializer for objects not serializable by default json code"""
@@ -54,7 +56,43 @@ def handleFetchList() -> str:
         flask.abort(400) # Bad request
     
     response = fetchReadingListInfo(reading_list_id=reading_list_id)
+    if "error" in response:
+        if "not found" in response["error"]:
+            flask.abort(404) # Not found
+        else:
+            flask.abort(500) # Internal server error
+            
     return json.dumps(response, default=json_serial)
+
+
+@server.put('/reading_lists/update_name')
+def handleUpdateListName() -> str:
+    if not flask.request:
+        flask.abort(400) # Bad request
+
+    reading_list_id: str | None = flask.request.args.get('reading_list_id')
+    name: str | None = flask.request.args.get('name')
+    if (not reading_list_id) or (not name):
+        flask.abort(400) # Bad request
+    
+    if updateListName(reading_list_id=reading_list_id, name=name):
+        return "Name updated!"
+    else:
+        flask.abort(500)
+
+@server.delete('/reading_lists')
+def handleDeleteList() -> str:
+    if not flask.request:
+        flask.abort(400) # Bad request
+
+    reading_list_id: str | None = flask.request.args.get('reading_list_id')
+    if not reading_list_id:
+        flask.abort(400) # Bad request
+    
+    if deleteList(reading_list_id=reading_list_id):
+        return "Name updated!"
+    else:
+        flask.abort(500)
 
 
 def runAsServer() -> None:
@@ -73,7 +111,7 @@ def fetchReadingListInfo(reading_list_id: str) -> dict:
             )
             response = cur.fetchone()
             if not response:
-                return {"error": "Could not fetch reading list."}
+                return {"error": "Reading list not found."}
             response["books"] = []
 
             cur.execute(
@@ -93,6 +131,44 @@ def fetchReadingListInfo(reading_list_id: str) -> dict:
 
     return response
 
+
+def updateListName(reading_list_id: str, name: str) -> bool:
+    try:
+        with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
+            with conn.cursor(row_factory=rows.dict_row) as cur:
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE reading_lists
+                            SET name = %s
+                            WHERE id = %s
+                    """), (name, reading_list_id)
+                )
+                if cur.rowcount > 0:
+                    conn.commit()
+                    return True
+                else:  
+                    return False
+    except psycopg.Error:
+        return False
+
+
+def deleteList(reading_list_id: str) -> bool:
+    try:
+        with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
+            with conn.cursor(row_factory=rows.dict_row) as cur:
+                cur.execute(
+                    sql.SQL("""
+                        DELETE FROM reading_lists
+                            WHERE id = %s
+                    """), (reading_list_id,)
+                )
+                if cur.rowcount > 0:
+                    conn.commit()
+                    return True
+                else:  
+                    return False
+    except psycopg.Error:
+        return False
 
 def semanticSearch(query: str, limit: int = 10, ids_to_search: set[int] | None = None) -> list[int]:
     '''

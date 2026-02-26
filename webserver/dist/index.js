@@ -18,6 +18,13 @@ const html_header = `
   <body>
 `;
 const html_footer = "</body></html>";
+function toTitleCase(str) {
+    return str
+        .toLowerCase()
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+}
 if (!port) {
     console.log("Could not start app: WEBSERVER_PORT environment variable undefined.");
     process.exit(1);
@@ -114,9 +121,6 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
         mode: "cors"
     });
     if (response && response.status === 200) {
-        //res.statusCode = 200;
-        //res.setHeader('Content-Type', 'text/html');
-        //res.send(html_header + (await response.text()) + html_footer);
         let response_data = await response.json();
         if (!response_data || !("user_id" in response_data) || !("name" in response_data)
             || !("prompt" in response_data) || !("created_at" in response_data)
@@ -131,13 +135,16 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
             <hr />
             <table style="width:80%">
                 <tr>
-                    <td id="list_name_label" contenteditable="false" style="font-size:2em; width=80%">
+                    <td id="list_name_label" contenteditable="false" colspan=2 style="font-size:2em; width=80%">
                         ${response_data.name}
                     </td>
                 </tr>
                 <tr>
-                    <td style="font-size:0.75em; color:#4466FF">
+                    <td style="font-size:0.75em">
                         <button id="list_name_edit_button">Edit name</button>
+                    </td>
+                    <td style="font-size:0.75em; text-align:right">
+                        <button id="list_delete_button">Delete list</button>
                     </td>
                 </tr>
             </table>
@@ -145,6 +152,7 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
             <script type="text/javascript">
                 const list_name_label = document.getElementById('list_name_label');
                 const list_name_edit_button = document.getElementById('list_name_edit_button');
+                const list_delete_button = document.getElementById('list_delete_button');
 
                 list_name_edit_button.addEventListener('click', () => {
                     if (list_name_edit_button.textContent === 'Edit name') {
@@ -154,6 +162,15 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
                     } else {
                         list_name_label.setAttribute('contenteditable', false);
                         list_name_edit_button.textContent = 'Edit name';
+                        let query_uri = new URLSearchParams({reading_list_id: '${req.params.reading_list_id}',
+                                                             name: list_name_label.textContent});
+                        fetch("http://${domain}:${engine_port}/reading_lists/update_name?" + query_uri, {
+                            method: "PUT",
+                            mode: "cors"
+                        })
+                        .then(response => {
+                            console.log('Name change request sent. Server response:', response.status);
+                        });
                     }
                 });
 
@@ -163,6 +180,23 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
                         list_name_edit_button.click();
                     }
                 });
+
+                list_delete_button.addEventListener('click', () => {
+                    if (confirm("Delete this reading list? This cannot be undone.")) {
+                        let query_uri = new URLSearchParams({reading_list_id: '${req.params.reading_list_id}'});
+                        fetch("http://${domain}:${engine_port}/reading_lists?" + query_uri, {
+                            method: "DELETE",
+                            mode: "cors"
+                        })
+                        .then(response => {
+                            console.log('Delete request sent. Server response:', response.status);
+                            if (response.status === 200) {
+                                window.location.replace("http://${domain}:${port}");
+                            }
+                        });
+                    }
+                });
+
             </script>
 
             <h4>Prompt: ${response_data.prompt}<br />
@@ -174,11 +208,11 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
             <table style="width:80%">
                 <tr style="background-color:#4466FF">
                     <td colspan="2" style="text-align:left; font-size:1.5em; color:#bbddff">
-                    <b>${count}</b>
+                    <b>‣ ${count}</b>
                     </td>
                 </tr>
                 <tr>
-                    <td colspan="2" style="text-align:left">
+                    <td colspan="2" style="text-align:left; font-size:1.25em">
                     <b>${book.title}</b>
                     </td>
                 </tr>
@@ -200,13 +234,13 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
                     <td style="text-align:left"><b>User rating / 5.0:</b> ${book.average_rating.toFixed(2)}</td>
                 </tr>
                 <tr>
-                    <td style="text-align:left"><b>Genres:</b> ${book.genre_tags.length ? book.genre_tags.join(", ") : "None"}</td>
+                    <td style="text-align:left"><b>Genres:</b> ${book.genre_tags.length ? toTitleCase(book.genre_tags.join(", ")) : "None"}</td>
                 </tr>
                 <tr>
-                    <td style="text-align:left"><b>Moods:</b> ${book.mood_tags.length ? book.mood_tags.join(", ") : "None"}</td>
+                    <td style="text-align:left"><b>Moods:</b> ${book.mood_tags.length ? toTitleCase(book.mood_tags.join(", ")) : "None"}</td>
                 </tr>
                 <tr>
-                    <td style="text-align:left"><b>Content warnings:</b> ${book.content_tags.length ? book.content_tags.join(", ") : "None"}</td>
+                    <td style="text-align:left"><b>Content warnings:</b> ${book.content_tags.length ? toTitleCase(book.content_tags.join(", ")) : "None"}</td>
                 </tr>
                 <tr>
                     <td style="text-align:left"><b>ISBN:</b> ${book.isbn_13}</td>
@@ -220,7 +254,7 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
         res.send(`${html_header}${html_body}${html_footer}`);
     }
     else {
-        res.statusCode = 500;
+        res.statusCode = response.status;
         res.setHeader('Content-Type', 'text/html');
         res.send(`<b>Error</b>:API server error.`);
     }

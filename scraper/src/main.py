@@ -368,13 +368,13 @@ def addBooksToDatabase(response: dict, ignore_last_updated: bool = False) -> Non
 
                 tags = book["cached_tags"] 
                 highest_genre_tag_count = max([tag["count"] for tag in tags["Genre"]], default=0)
-                genre_tags = [tag["tag"] for tag in tags["Genre"] if tag["count"] >= 2 and tag["count"] >= 0.2 * highest_genre_tag_count]
+                genre_tags = [tag["tag"].lower() for tag in tags["Genre"] if tag["count"] >= 2 and tag["count"] >= 0.1 * highest_genre_tag_count]
                 book["genre_tags"] = genre_tags
                 highest_mood_tag_count = max([tag["count"] for tag in tags["Mood"]], default=0)
-                mood_tags = [tag["tag"] for tag in tags["Mood"] if tag["count"] >= 2 and tag["count"] >= 0.2 * highest_mood_tag_count]
+                mood_tags = [tag["tag"].lower() for tag in tags["Mood"] if tag["count"] >= 2 and tag["count"] >= 0.1 * highest_mood_tag_count]
                 book["mood_tags"] = mood_tags
                 highest_content_tag_count = max([tag["count"] for tag in tags["Content Warning"]], default=0)
-                content_tags = [tag["tag"] for tag in tags["Content Warning"] if tag["count"] >= 2 and tag["count"] >= 0.2 * highest_content_tag_count]
+                content_tags = [tag["tag"].lower() for tag in tags["Content Warning"] if tag["count"] >= 2 and tag["count"] >= 0.1 * highest_content_tag_count]
                 book["content_tags"] = content_tags
 
                 if any(tag in genre_tags for tag in [
