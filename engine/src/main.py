@@ -5,6 +5,7 @@ import argparse
 import flask
 import flask_cors
 import json
+import uuid
 from datetime import date
 from collections import defaultdict
 from psycopg import sql, rows
@@ -23,8 +24,13 @@ flask_cors.CORS(server)
 
 def json_serial(obj):
     """JSON serializer for objects not serializable by default json code"""
+
     if isinstance(obj, date):
-        return obj.isoformat() 
+        return obj.isoformat()
+    
+    if isinstance(obj, uuid.UUID):
+        return str(obj)
+
     raise TypeError(f"Type {type(obj)} not serializable")
 
 
@@ -53,15 +59,16 @@ def handleFetchList() -> str:
 
     reading_list_id: str | None = flask.request.args.get('reading_list_id')
     if not reading_list_id:
-        flask.abort(400) # Bad request
-    
-    response = fetchReadingListInfo(reading_list_id=reading_list_id)
+        response = fetchReadingLists()
+    else:
+        response = fetchReadingListInfo(reading_list_id=reading_list_id)
+
     if "error" in response:
         if "not found" in response["error"]:
             flask.abort(404) # Not found
         else:
             flask.abort(500) # Internal server error
-            
+
     return json.dumps(response, default=json_serial)
 
 
@@ -80,6 +87,7 @@ def handleUpdateListName() -> str:
     else:
         flask.abort(500)
 
+
 @server.delete('/reading_lists')
 def handleDeleteList() -> str:
     if not flask.request:
@@ -90,7 +98,26 @@ def handleDeleteList() -> str:
         flask.abort(400) # Bad request
     
     if deleteList(reading_list_id=reading_list_id):
-        return "Name updated!"
+        return "List deleted."
+    else:
+        flask.abort(500)
+
+
+@server.delete('/reading_lists/book')
+def handleDeleteListBook() -> str:
+    if not flask.request:
+        flask.abort(400) # Bad request
+
+    reading_list_id: str | None = flask.request.args.get('reading_list_id')
+    if not reading_list_id:
+        flask.abort(400) # Bad request
+
+    book_id: str | None = flask.request.args.get('book_id')
+    if not book_id:
+        flask.abort(400) # Bad request
+    
+    if deleteListBook(reading_list_id=reading_list_id, book_id=int(book_id)):
+        return "Book removed from list."
     else:
         flask.abort(500)
 
@@ -98,6 +125,27 @@ def handleDeleteList() -> str:
 def runAsServer() -> None:
     port = int(loadenv.loadEnvVariable("ENGINE_PORT"))
     server.run(port=port)
+
+
+def fetchReadingLists(user_id: int = 0) -> dict:
+    try:
+        with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
+            with conn.cursor(row_factory=rows.dict_row) as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT id, name, created_at FROM reading_lists
+                            WHERE user_id = %s
+                    """), (user_id,)
+                )
+                response = cur.fetchall()
+
+        if not response:
+            return {"lists": []}
+        else:
+            return {"lists": response}
+        
+    except psycopg.Error:
+        return {"error": "Database error"}
 
 
 def fetchReadingListInfo(reading_list_id: str) -> dict:
@@ -116,8 +164,8 @@ def fetchReadingListInfo(reading_list_id: str) -> dict:
 
             cur.execute(
                 sql.SQL("""
-                    SELECT book_id, removed FROM reading_list_books
-                        WHERE reading_list_id = %s
+                    SELECT book_id FROM reading_list_books
+                        WHERE reading_list_id = %s AND NOT removed
                         ORDER BY rank ASC
                 """), (reading_list_id,)
             )
@@ -125,9 +173,8 @@ def fetchReadingListInfo(reading_list_id: str) -> dict:
             if not book_ids:
                 return {"error": "Could not fetch books from reading list."}
             for book_id in book_ids:
-                if not book_id["removed"]:
-                    book = db_queries.fetchBookByID(book_id["book_id"])
-                    response["books"].append(book)
+                book = db_queries.fetchBookByID(book_id["book_id"])
+                response["books"].append(book)
 
     return response
 
@@ -169,6 +216,27 @@ def deleteList(reading_list_id: str) -> bool:
                     return False
     except psycopg.Error:
         return False
+
+
+def deleteListBook(reading_list_id: str, book_id: int) -> bool:
+    try:
+        with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
+            with conn.cursor(row_factory=rows.dict_row) as cur:
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE reading_list_books
+                            SET removed = true
+                            WHERE (reading_list_id = %s) AND (book_id = %s)
+                    """), (reading_list_id, book_id)
+                )
+                if cur.rowcount > 0:
+                    conn.commit()
+                    return True
+                else:  
+                    return False
+    except psycopg.Error:
+        return False
+
 
 def semanticSearch(query: str, limit: int = 10, ids_to_search: set[int] | None = None) -> list[int]:
     '''
