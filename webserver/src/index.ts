@@ -18,7 +18,7 @@ const html_header = `
         <title>Bookrover</title>
     </head>
     <body>
-        <h1 style="color:#0033aa">Bookrover</h1>
+        <a href="/" style="text-decoration: none;"><h1 style="color:#0033aa">Bookrover</h1></a>
         <h3>RAG-powered fiction search engine</h3>
         <hr />
 `
@@ -130,7 +130,17 @@ app.get("/generate_loader", async (req, res) => {
         res.send(`<b>Error</b>: No query provided`);
         return;
     }
-    let query_uri = new URLSearchParams({query: query})
+
+    let extend_list_id = req.query.extend_list_id;
+    let query_uri: URLSearchParams;
+    if (!extend_list_id || typeof(extend_list_id) != "string") {
+        query_uri = new URLSearchParams({query: query})
+    } else {
+        query_uri = new URLSearchParams({
+            query: query,
+            extend_list_id: extend_list_id                                
+        })
+    }
     res.setHeader('Content-Type', 'text/html');
     res.send(html_header +
         `
@@ -160,16 +170,29 @@ app.get("/list_loader", async (req, res) => {
         <script>
             window.location.replace("../reading_lists/${reading_list_id}")
         </script>` + html_footer
-    )
+    );
 })
 
 
 app.get("/generate_list", async (req, res) => {
+    let body: string;
+
     let query = req.query.query
-    if (!query) {
+    if (!query|| typeof(query) != "string") {
         res.statusCode = 400;
         res.setHeader('Content-Type', 'text/html');
         res.send(`<b>Error</b>: No query provided`);
+        return;
+    }
+
+    let extend_list_id = req.query.extend_list_id
+    if (!extend_list_id || typeof(extend_list_id) != "string") {
+        body = JSON.stringify({query: query});
+    } else {
+        body = JSON.stringify({
+            query: query,
+            extend_list_id: extend_list_id
+        });
     }
 
     const response = await fetch(
@@ -180,7 +203,7 @@ app.get("/generate_list", async (req, res) => {
             headers: {
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({query: query})
+            body: body
         }
     )
     if (response && response.status === 200) {
@@ -230,6 +253,11 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
             res.send(`<b>Error</b>: Bad response from API server.`);
         }
         
+        let extend_query_uri = new URLSearchParams({
+            query: response_data.prompt,
+            extend_list_id: req.params.reading_list_id                                
+        })
+
         let html_body = `
             <table style="width:80%; border: 0px">
                 <tr>
@@ -295,6 +323,8 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
 
             <h4>Prompt: ${response_data.prompt}<br />
             Created ${response_data.created_at}</h4>
+            <button id="extend_list_top_button" onclick="window.location.href='../generate_loader?${extend_query_uri.toString()}'">Extend list</button>
+            <br />
         `;
         let count: number = 1;
         for (let book of response_data.books) {
@@ -364,6 +394,10 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
             `
             count++;
         }
+        html_body += `
+            <button id="extend_list_bottom_button" onclick="window.location.href='../generate_loader?${extend_query_uri.toString()}'">Extend list</button>
+        `;
+
         res.statusCode = 200;
         res.setHeader('Content-Type', 'text/html');
         res.send(`${html_header}${html_body}${html_footer}`);

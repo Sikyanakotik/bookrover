@@ -9,7 +9,7 @@
     "scraper": ".venv/bin/python scraper/src/main.py",
     "engine": ".venv/bin/python engine/src/main.py",
     "serverdev": "npx tsc && node webserver/dist/index.js",
-    "webserver": "node dist/index.js"
+    "webserver": "node webserver/dist/index.js"
   },
   "author": "Patrick Reding",
   "license": "ISC",

@@ -2,6 +2,10 @@ import os
 import sys
 import json
 from openai import OpenAI
+from google import genai
+from google.genai import types as gtypes
+import anthropic
+
 
 import keyword_synonyms
 
@@ -151,15 +155,42 @@ KEYWORD_CATEGORIES = ["authors", "title", "genre", "mood", "content warnings",
                       "description"]
 
 def LLMRequest(user_prompt:str, system_prompt:str = DEFAULT_SYSTEM_PROMPT) -> str:
+    '''
+    LLMRequest: Sends a request to the LLM. Calls the appropriate helper function based on
+                LLM_TYPE .env variable.
+    
+    :param user_prompt: The user's query.
+    :type tag: str
+    :param system_prompt: The system prompt, with detailed instructions on how to process the
+                          user's query.
+    :type category: str
+    :return: The LLM's response.
+    :rtype: str
+    '''
     llm_type = loadenv.loadEnvVariable("LLM_TYPE")
 
     match llm_type:
-        case "OpenAI":
+        case "OpenAI" | "ChatGPT":
             return OpenAIRequest(user_prompt, system_prompt)
+        case "Google" | "Gemini":
+            return GeminiRequest(user_prompt, system_prompt)
+        case "Anthropic" | "Claude":
+            return ClaudeRequest(user_prompt, system_prompt)
         case _:
             raise NotImplementedError(f"LLM provider {llm_type} not supported.")
 
 def OpenAIRequest(user_prompt:str, system_prompt:str) -> str:
+    '''
+    OpenAIRequest: Sends a request to an OpenAI (ChatGPT) LLM.
+    
+    :param user_prompt: The user's query.
+    :type tag: str
+    :param system_prompt: The system prompt, with detailed instructions on how to process the
+                          user's query.
+    :type category: str
+    :return: The LLM's response.
+    :rtype: str
+    '''
     client = OpenAI(api_key=loadenv.loadEnvVariable("LLM_API_KEY"))
 
     response = client.responses.create(
@@ -170,7 +201,79 @@ def OpenAIRequest(user_prompt:str, system_prompt:str) -> str:
 
     return response.output_text
 
+def GeminiRequest(user_prompt:str, system_prompt:str) -> str:
+    '''
+    OpenAIRequest: Sends a request to a Google (Gemini) LLM.
+    
+    :param user_prompt: The user's query.
+    :type tag: str
+    :param system_prompt: The system prompt, with detailed instructions on how to process the
+                          user's query.
+    :type category: str
+    :return: The LLM's response.
+    :rtype: str
+    '''
+    client = genai.Client(api_key=loadenv.loadEnvVariable("LLM_API_KEY"))
+
+    response = client.models.generate_content(
+        model = loadenv.loadEnvVariable("LLM_MODEL"),
+        contents = f"{system_prompt}\n\nUser prompt: {user_prompt}"
+    )
+
+    if response.text:
+        return response.text
+    else:
+        return "Error: No reponse from LLM."
+
+
+def ClaudeRequest(user_prompt:str, system_prompt:str) -> str:
+    '''
+    OpenAIRequest: Sends a request to an Anthropic (Claude) LLM.
+    
+    :param user_prompt: The user's query.
+    :type tag: str
+    :param system_prompt: The system prompt, with detailed instructions on how to process the
+                          user's query.
+    :type category: str
+    :return: The LLM's response.
+    :rtype: str
+    '''
+    client = anthropic.Anthropic(api_key=loadenv.loadEnvVariable("LLM_API_KEY"))
+
+    response = client.messages.create(
+        model = loadenv.loadEnvVariable("LLM_MODEL"),
+        max_tokens=1024,
+        messages = [
+            {"role": "user", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+    )
+
+    content = response.content[-1]
+    if content.type == "text":
+        return content.text
+    else:
+        return "Error: No reponse from LLM."
+
+
 def extractKeywords(user_prompt: str) -> list[dict]:
+    '''
+    extractKeywords: Uses the LLM to extract relevant keywords from a user's query. Read the
+                     KEYWORD_EXTRACTION_SYSTEM_PROMPT variable for the exact instructions
+                     passed, including details of the return format.
+
+    :param user_prompt: The user's query.
+    :type tag: str
+    :rtype: list[dict]
+    :return: A list of dictionaries with the following structure:
+    - "keyword" (str): An identified keyword.
+    - "strength" (str): The strength of the keyword, from "mandatory", "positive",
+                        "negative", or "disqualifying".
+    - "categories" (list[str]): A list of the fields in the book metadata where the keyword
+                                will be searched for. 
+    - "justification" (str): The LLM's justification for the keyword's entry, used mainly
+                             for debugging.
+    '''
     default_output: list[dict] = []
 
     max_attempts = 5
@@ -280,6 +383,12 @@ def extractKeywords(user_prompt: str) -> list[dict]:
     return default_output
 
 def main() -> None:
+    '''
+    main: A simple test that the LLM is working correctly.
+    
+    :return: None
+    :rtype: None
+    '''
     # Test that the LLM can receive and respond to prompts.
     print(extractKeywords("Not fantasy. Unless it’s low fantasy. Actually, maybe sci-fi. But no space."))
 

@@ -6,7 +6,7 @@ from the Hardcover API and store it in the database.
 import os
 import sys
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from time import sleep
 import re
 import requests
@@ -60,6 +60,16 @@ STOP_WORDS = set([
 ])
 
 def reset_database() -> None:
+    '''
+    reset_database: Clears and initialises the tables in the database. This function defines
+                    the schemas for each table, which is detailed in the comments.
+                    
+    WARNING: If the database hasn't been initialised, you must run this function first.
+             This function will delete any existing app data.
+
+    :return: None
+    :rtype: None
+    '''
     model_dimensions = int(loadenv.loadEnvVariable("EMBEDDING_DIMENSIONS"))
     
     with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
@@ -303,14 +313,26 @@ def reset_database() -> None:
 
 
 def addBooksToDatabase(response: dict, ignore_last_updated: bool = False) -> None:
-  
+    '''
+    addBooksToDatabase: Takes the response from the Hardcover.app API and turns it into
+                        a list of books in the books database table. If the book is already
+                        present, update the book's information.
+    
+    :param response: The response from the Hardcover.api, in dictionary format.
+    :type response: dict
+    :param ignore_last_updated: If false, existing books are only updated if they were last
+                                updated more than a week ago. If true, all existing books
+                                are updated.
+    :type limit: bool
+    :return: None
+    :rtype: None
+    '''
     if "data" not in response or "books" not in response["data"]:
         print(f"Unexpected API response format. Response: {response}")
         raise JSONDecodeError("Unexpected API response format", str(response), 0)
 
     with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
-        with conn.cursor() as cur:
-            cur = conn.cursor(row_factory=rows.dict_row)
+        with conn.cursor(row_factory=rows.dict_row) as cur:
             for book in response["data"]["books"]:
                 if not book or type(book) != dict:
                     print("Unexpected book format in API response. Skipping.")
@@ -337,9 +359,13 @@ def addBooksToDatabase(response: dict, ignore_last_updated: bool = False) -> Non
 
                 # Extract relevant fields from the API response
                 title = book["title"]
-                description = book["description"]
                 average_rating = book["rating"]
 
+                description = book["description"]
+                if not description:
+                    continue # If a book doesn't have a description, we won't have enough data
+                             # to analyse it in a query. So let's skip these.   
+                
                 if not book["contributions"]:
                     print(f'Book "{title}" ({hardcover_id}) has no contributors data. Skipping.')
                     continue
@@ -378,49 +404,53 @@ def addBooksToDatabase(response: dict, ignore_last_updated: bool = False) -> Non
                 book["content_tags"] = content_tags
 
                 if any(tag in genre_tags for tag in [
-                    "Comics", "Graphic Novels", "Comics & Graphic Novels",
-                    "Manga", "Manhwa", "Non-Fiction", "Nonfiction", "Biography",
-                    "Memoir", "Essays", "Self-Help", "Puzzles", "Textbooks"]):
+                    "comics", "graphic novels", "comics & graphic novels",
+                    "manga", "manhwa", "non-fiction", "nonfiction", "biography",
+                    "memoir", "essays", "self-help", "puzzles", "textbooks"]):
                     # Bookrover is for prose fiction.
                     continue
 
-                if "Poetry" in genre_tags and ("Epic Poetry" not in genre_tags or "Narrative Poetry" not in genre_tags):
+                if "poetry" in genre_tags and ("epic poetry" not in genre_tags or "narrative poetry" not in genre_tags):
                     # We don't want poetry collections, but narrative poetry is fine.
                     continue
 
                 # Add the book to the database, or update it if it already exists
-                cur.execute(sql.SQL("""
-                    INSERT INTO books (
-                        hardcover_id, isbn_13, title, authors, num_good_ratings,
-                        average_rating, release_date, genre_tags, mood_tags,
-                        content_tags, description, languages
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (hardcover_id) DO UPDATE SET
-                        isbn_13 = EXCLUDED.isbn_13,
-                        title = EXCLUDED.title,
-                        authors = EXCLUDED.authors,
-                        num_good_ratings = EXCLUDED.num_good_ratings,
-                        average_rating = EXCLUDED.average_rating,
-                        release_date = EXCLUDED.release_date,
-                        genre_tags = EXCLUDED.genre_tags,
-                        mood_tags = EXCLUDED.mood_tags,
-                        content_tags = EXCLUDED.content_tags,
-                        description = EXCLUDED.description,
-                        languages = EXCLUDED.languages
-                """), (
-                    hardcover_id,
-                    isbn_13,
-                    title,
-                    authors,
-                    num_good_ratings,
-                    average_rating,
-                    release_date,
-                    genre_tags,
-                    mood_tags,
-                    content_tags,
-                    description,
-                    languages
-                ))
+                try:
+                    cur.execute(sql.SQL("""
+                        INSERT INTO books (
+                            hardcover_id, isbn_13, title, authors, num_good_ratings,
+                            average_rating, release_date, genre_tags, mood_tags,
+                            content_tags, description, languages
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (hardcover_id) DO UPDATE SET
+                            isbn_13 = EXCLUDED.isbn_13,
+                            title = EXCLUDED.title,
+                            authors = EXCLUDED.authors,
+                            num_good_ratings = EXCLUDED.num_good_ratings,
+                            average_rating = EXCLUDED.average_rating,
+                            release_date = EXCLUDED.release_date,
+                            genre_tags = EXCLUDED.genre_tags,
+                            mood_tags = EXCLUDED.mood_tags,
+                            content_tags = EXCLUDED.content_tags,
+                            description = EXCLUDED.description,
+                            languages = EXCLUDED.languages
+                    """), (
+                        hardcover_id,
+                        isbn_13,
+                        title,
+                        authors,
+                        num_good_ratings,
+                        average_rating,
+                        release_date,
+                        genre_tags,
+                        mood_tags,
+                        content_tags,
+                        description,
+                        languages
+                    ))
+                except psycopg.Error:
+                    print(f'Could not add book {title} ({hardcover_id}) to the database. Skipping,')
+                    continue
 
                 book_id_response = cur.execute(sql.SQL("SELECT id FROM books WHERE hardcover_id = %s"), (hardcover_id,)).fetchone()
                 if not book_id_response or "id" not in book_id_response:
@@ -455,7 +485,21 @@ def addBooksToDatabase(response: dict, ignore_last_updated: bool = False) -> Non
             conn.commit()
 
 
-def updateInvertedIndex(cur, new_book: dict, existing_book: dict | None) -> None:
+def updateInvertedIndex(cur: psycopg.Cursor[rows.DictRow], new_book: dict,
+                        existing_book: dict | None) -> None:
+    '''
+    updateInvertedIndex: Updates the inverted index table, allowing the engine to look up 
+                         books by keywords.
+    
+    :param cur: The cursor into the database.
+    :type cur: psycopg.Cursor[rows.DictRow]
+    :param new_book: The book information to add to the inverted index.
+    :type limit: dict
+    :param old_book: The book's previous information, if present.
+    :type limit: dict
+    :return: None
+    :rtype: None
+    '''
     fields = ["title", "authors", "description", "genre_tags", "mood_tags", "content_tags"]
     stemmer = PorterStemmer()
 
@@ -525,11 +569,17 @@ def updateInvertedIndex(cur, new_book: dict, existing_book: dict | None) -> None
 
 def populateDatabase(genres: list[str] | str | None = None) -> None:
     '''
-    Adds books in batches from the Hardcover API to the database, starting with the most 
-    popular books in each of fourteen canonical genres.
+    populateDatabase: Adds books in batches from the Hardcover API to the database, starting
+                      with the most popular books in each of the genres provided.
 
-    Don't fill the database all at once, or Hardcover will cut us off. Use the scheduler
-    (once it's implemented) to add new books on a reasonable schedule.
+    NOTE: Don't fill the database all at once, or Hardcover will cut us off. Instead, run
+          the scraper in background mode to add new books on a reasonable schedule.
+    
+    :param genres: A genre or list of genres to include. If None, we use a default list
+                   of fourteen canonical genres.
+    :type genres: list[str] | str | None
+    :return: None
+    :rtype: None
     '''
     if genres is None:
         genres_to_search = ["Fantasy", "Science Fiction", "Romance", "Thriller", "Mystery",
@@ -550,14 +600,18 @@ def populateDatabase(genres: list[str] | str | None = None) -> None:
                            # in case we keep hitting pages with books we've already added
                            # to the database. We don't want to keep hammering the API
                            # with requests that won't add any new books all at once.
+    min_added_books = 10   # The minimum number of books to add in a genre, assuming we
+                           # haven't hit max_repeated_pages.
+
 
     api_url = loadenv.loadEnvVariable("HARDCOVER_API_URL")
     api_key = loadenv.loadEnvVariable("HARDCOVER_API_KEY")
 
     for genre in genres_to_search:
-        if db_size >= max_books_db_size:
-            print(f"Database has reached the maximum size of {max_books_db_size} books. Stopping population.")
-            break
+        new_books_added = 0
+        #if db_size >= max_books_db_size:
+        #    print(f"Database has reached the maximum size of {max_books_db_size} books. Stopping population.")
+        #    break
 
         page: int
         with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
@@ -612,12 +666,12 @@ def populateDatabase(genres: list[str] | str | None = None) -> None:
                 page = 0 # Reset page so we start again from the beginning, updating 
                          # older entries and maybe finding books that slipped through the
                          # cracks.
-                sleep(2) # Keep being nice to the API.
+                sleep(5) # Keep being nice to the API.
                 break
             ids = [int(id) for id in ids] # Ensure all IDs are integers
             print(f"Fetched Hardcover IDs for genre {genre} on page {page}: {len(ids)} books found.")
 
-            sleep(2) # Be nice to the API, and avoid sending too many requests in a 
+            sleep(5) # Be nice to the API, and avoid sending too many requests in a 
                      # short time.
 
             ## Fetch detailed book data for the Hardcover IDs we got back, and add it to
@@ -670,19 +724,20 @@ def populateDatabase(genres: list[str] | str | None = None) -> None:
                 return
 
             addBooksToDatabase(response.json())
-            new_books_added = db_queries.getBookCount() - db_size
-            if new_books_added > 0:
+            new_books_added += db_queries.getBookCount() - db_size
+            db_size = db_queries.getBookCount() # Update the database size after adding new books
+            if new_books_added >= min_added_books:
                 print(f"Added {new_books_added} new books to the database for genre {genre}. Total books in database: {db_queries.getBookCount()}")
-                db_size = db_queries.getBookCount() # Update the database size after adding new books
-                sleep(2) # Keep being nice to the API.
+                sleep(5) # Keep being nice to the API.
                 break # Move to the next genre after successfully adding new books
             
-            print(f"No new books added for genre {genre} on page {page}. Repeated books updated.")
+            
+            print(f"{new_books_added} out of minimum {min_added_books} new books added for genre {genre} on page {page}.")
             if tries < max_repeated_pages - 1: # Don't print this message on the last try, since we'll be moving to the next genre anyway
                 print("Trying the next page.")
             else:
-                print(f"Reached the maximum number of tries ({max_repeated_pages}) without adding new books. Moving to the next genre.")
-            sleep(2) # Keep being nice to the API. (They've been so nice to us!)
+                print(f"Reached the maximum number of tries ({max_repeated_pages}). Moving to the next genre.")
+            sleep(5) # Keep being nice to the API. (They've been so nice to us!)
 
         with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
             with conn.cursor() as cur:
@@ -697,8 +752,67 @@ def populateDatabase(genres: list[str] | str | None = None) -> None:
 
     print(f"Finished populating database. Total books in database: {db_queries.getBookCount()}")
             
+    # Remove the lowest-ranked books that aren't in reading lists to get back down to the
+    # maximum.
+    num_books_over_max = db_size - max_books_db_size
+    if num_books_over_max > 0:
+        removeWorstBooks(num_books_over_max)
 
-def hardcover_api_test() -> None:
+
+def removeWorstBooks(num_books: int):
+    '''
+    removeWorstBooks: Removed the lowest ranked books by average user ranking from the
+                      database, allow us to stay under the maximum.
+    
+    :param num_books: The number of books to remove. Must be at least 0.
+    :type genres: int
+    :return: None
+    :rtype: None
+    '''
+    if num_books <= 0:
+        return
+
+    print(f"Deleting the {num_books} lowest-ranked books.")
+    with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
+        with conn.cursor() as cur:
+            # Start by excluding any books already in a reading list, even if they've been
+            # removed. Otherwise, we could break an existing reading list.
+            # In the future, we should also exclude books in the user's archive and rejected
+            # books.
+            cur.execute(
+                sql.SQL("""
+                    SELECT DISTINCT book_id FROM reading_list_books
+                """)
+            )
+            result = cur.fetchall()
+            locked_books = [id_row[0] for id_row in result]
+            cur.execute(
+                sql.SQL("""
+                    SELECT id FROM books
+                    WHERE NOT id = ANY(%s)
+                    ORDER BY average_rating ASC
+                    LIMIT %s
+                """), (locked_books, num_books)
+            )
+            result = cur.fetchall()
+            books_to_remove = [id_row[0] for id_row in result]
+            cur.execute(
+                sql.SQL("""
+                    DELETE FROM books
+                    WHERE id = ANY(%s)
+                """), (books_to_remove, )
+            )
+            conn.commit()
+    print(f"Deletion successful. New database size: {db_queries.getBookCount()}")
+
+def hardcoverApiTest() -> None:
+    '''
+    hardcoverApiTest: A test of the Hardcover.app API, retrieving and adding the top ten
+                      books in Hardcover's database to our database.
+
+    :return: None
+    :rtype: None
+    '''
     api_url = loadenv.loadEnvVariable("HARDCOVER_API_URL")
     api_key = loadenv.loadEnvVariable("HARDCOVER_API_KEY")
 
@@ -749,7 +863,16 @@ def hardcover_api_test() -> None:
     print(f"Total books in database: {db_queries.getBookCount()}")
 
 
-def book_revision_test() -> None:
+def bookRevisionTest() -> None:
+    '''
+    bookRevisionTest: A test for storing and updating a book's information in the inverted
+                      index.
+
+    WARNING: Running this function will reset the database, deleting all stored data.
+
+    :return: None
+    :rtype: None
+    '''
     reset_database() # Clear the database to ensure a clean slate for testing book revisions.
     test_book = {
         "title": "Lift",
@@ -876,6 +999,12 @@ def book_revision_test() -> None:
 
 
 def main() -> None:
+    '''
+    main: The main entry point for the scraper.
+
+    :return: None
+    :rtype: None
+    '''
     parser = argparse.ArgumentParser(description="Scrape book data from the Hardcover API into the database.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -886,6 +1015,9 @@ def main() -> None:
 
     background_parser = subparsers.add_parser("background", help="Run the scraper in the background, periodically checking for new books to add. Not implemented yet.")
     background_parser.add_argument("--interval", type=int, default=30, help="Interval in minutes between checks for new books. Default is 30 minutes.")
+
+    remove_parser = subparsers.add_parser("remove", help="Remove the lowest-ranked books.")
+    remove_parser.add_argument("num_books", type=int, help="Number of books to remove.")
 
     test_api_parser = subparsers.add_parser("test_api", help="Test the API connection and add some books to the database.")
     test_revision_parser = subparsers.add_parser("test_revision", help="Test updating a book's data in the database, and check that the inverted index is updated correctly.")
@@ -902,11 +1034,22 @@ def main() -> None:
                 print(f"Populating database with canonical genres.")
                 populateDatabase()
         case "background":
-            raise NotImplementedError("Background mode is not implemented yet.")
+            interval = args.interval
+            print(f'Populating in background every {interval} minutes. Press Ctrl+C to stop.')
+            while True:
+                next_job = datetime.now() + timedelta(minutes=interval)
+                populateDatabase()
+                while datetime.now() < next_job:
+                    print(f"Waiting. Time to next job: {next_job - datetime.now()}")
+                    sleep(60) # Check every minute. We don't need to be more granular than
+                              # this, and we don't want to spam the CPU with the checks.
+        case "remove":
+            num_books = args.num_books
+            removeWorstBooks(num_books)
         case "test_api":   
-            hardcover_api_test()
+            hardcoverApiTest()
         case "test_revision":
-            book_revision_test()
+            bookRevisionTest()
         case _:
             print("Invalid command.")
             exit(1)

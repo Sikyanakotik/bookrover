@@ -1,5 +1,5 @@
 import psycopg
-from psycopg import sql
+from psycopg import sql, rows
 from nltk.stem import PorterStemmer
 
 from . import loadenv
@@ -82,3 +82,43 @@ def fetchAllIds() -> list[int]:
             results = cur.fetchall()
 
     return [item[0] for item in results]
+
+def fetchReadingListInfo(reading_list_id: str, include_removed: bool = False) -> dict:
+    print(reading_list_id)
+    with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
+        with conn.cursor(row_factory=rows.dict_row) as cur:
+            cur.execute(
+                sql.SQL("""
+                    SELECT user_id, name, prompt, keywords, created_at FROM reading_lists
+                        WHERE id = %s
+                """), (reading_list_id,)
+            )
+            response = cur.fetchone()
+            if not response:
+                return {"error": "Reading list not found."}
+            response["books"] = []
+
+            if include_removed:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT book_id FROM reading_list_books
+                            WHERE reading_list_id = %s
+                            ORDER BY rank ASC
+                    """), (reading_list_id,)
+                )
+            else:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT book_id FROM reading_list_books
+                            WHERE reading_list_id = %s AND NOT removed
+                            ORDER BY rank ASC
+                    """), (reading_list_id,)
+                )
+            book_ids = cur.fetchall()
+            if not book_ids:
+                return {"error": "Could not fetch books from reading list."}
+            for book_id in book_ids:
+                book = fetchBookByID(book_id["book_id"])
+                response["books"].append(book)
+
+    return response

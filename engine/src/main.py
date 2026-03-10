@@ -22,8 +22,15 @@ from shared_python.src import embeddings
 server = flask.Flask(__name__)
 flask_cors.CORS(server)
 
-def json_serial(obj):
-    """JSON serializer for objects not serializable by default json code"""
+def json_serial(obj) -> str:
+    '''
+    json_serial: JSON serializer for objects not serializable by default json code
+
+    :param obj: The object to serialize.
+    :type obj: Unknown
+    :return: The serialized object, as a string.
+    :rtype: str
+    '''
 
     if isinstance(obj, date):
         return obj.isoformat()
@@ -36,11 +43,24 @@ def json_serial(obj):
 
 @server.get('/')
 def handleStatus() -> str:
+    '''
+    handleStatus: HTTP handler. A basic check that the engine API is online.
+
+    :return: A simple message confirming the engine in online.
+    :rtype: str
+    '''
     return "Bookrover engine is <b>online</b>!"
 
 
 @server.post('/reading_lists')
 def handleGenerate() -> str:
+    '''
+    handleGenerate: HTTP handler. Service for generating new reading lists from a user 
+                    prompt.
+
+    :return: A JSON response with the ID of the new reading list.
+    :rtype: str
+    '''
     if not flask.request or not flask.request.is_json:
         flask.abort(400) # Bad request
 
@@ -48,12 +68,37 @@ def handleGenerate() -> str:
     if "query" not in request:
         flask.abort(400) # Bad request
     
-    response = {"reading_list_id": generateReadingList(request["query"])}
+    if "extend_list_id" in request:
+        extend_list_id = str(request["extend_list_id"])
+        limit = 5
+        list = db_queries.fetchReadingListInfo(reading_list_id=extend_list_id, include_removed=True)
+        if "error" in list:
+            flask.abort(500)
+        keywords = json.loads(list["keywords"])
+        ids_to_exclude = [book["id"] for book in list["books"]]
+
+    else:
+        extend_list_id = None
+        limit = 10
+        ids_to_exclude = None
+        keywords = None
+
+    response = {"reading_list_id": generateReadingList(
+        request["query"], limit=limit, ids_to_exclude = ids_to_exclude,
+        keywords = keywords, extend_list_id=extend_list_id
+    )}
     return json.dumps(response)
 
 
 @server.get('/reading_lists')
 def handleFetchList() -> str:
+    '''
+    handleFetchList: HTTP handler. Service for returning informaton about a reading list,
+                     including contents and metadata.
+
+    :return: A JSON response with the reading list information.
+    :rtype: str
+    '''
     if not flask.request:
         flask.abort(400) # Bad request
 
@@ -61,7 +106,7 @@ def handleFetchList() -> str:
     if not reading_list_id:
         response = fetchReadingLists()
     else:
-        response = fetchReadingListInfo(reading_list_id=reading_list_id)
+        response = db_queries.fetchReadingListInfo(reading_list_id=reading_list_id)
 
     if "error" in response:
         if "not found" in response["error"]:
@@ -74,6 +119,12 @@ def handleFetchList() -> str:
 
 @server.put('/reading_lists/update_name')
 def handleUpdateListName() -> str:
+    '''
+    handleUpdateListName: HTTP handler. Service for renaming reading lists.
+
+    :return: Confirmation that the name has been updated.
+    :rtype: str
+    '''
     if not flask.request:
         flask.abort(400) # Bad request
 
@@ -90,6 +141,12 @@ def handleUpdateListName() -> str:
 
 @server.delete('/reading_lists')
 def handleDeleteList() -> str:
+    '''
+    handleDeleteList: HTTP handler. Service for deleting reading lists.
+
+    :return: Confirmation that the list has been deleted.
+    :rtype: str
+    '''
     if not flask.request:
         flask.abort(400) # Bad request
 
@@ -105,6 +162,12 @@ def handleDeleteList() -> str:
 
 @server.delete('/reading_lists/book')
 def handleDeleteListBook() -> str:
+    '''
+    handleDeleteListBook: HTTP handler. Service for removing a book from a reading list.
+
+    :return: Confirmation that the book has been removed.
+    :rtype: str
+    '''
     if not flask.request:
         flask.abort(400) # Bad request
 
@@ -123,11 +186,26 @@ def handleDeleteListBook() -> str:
 
 
 def runAsServer() -> None:
+    '''
+    runAsServer: Starts the engine as an API server.
+
+    :return: None
+    :rtype: None
+    '''
     port = int(loadenv.loadEnvVariable("ENGINE_PORT"))
     server.run(port=port)
 
 
 def fetchReadingLists(user_id: int = 0) -> dict:
+    '''
+    fetchReadingLists: Returns the name and ID of each list in the reading_lists database
+                       table created by the given user.
+
+    :param user_id: The id of the user.
+    :type user_id: int
+    :return: A dictionary containing the name and id of each reading list.
+    :rtype: dict
+    '''
     try:
         with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
             with conn.cursor(row_factory=rows.dict_row) as cur:
@@ -148,38 +226,20 @@ def fetchReadingLists(user_id: int = 0) -> dict:
         return {"error": "Database error"}
 
 
-def fetchReadingListInfo(reading_list_id: str) -> dict:
-    with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
-        with conn.cursor(row_factory=rows.dict_row) as cur:
-            cur.execute(
-                sql.SQL("""
-                    SELECT user_id, name, prompt, created_at FROM reading_lists
-                        WHERE id = %s
-                """), (reading_list_id,)
-            )
-            response = cur.fetchone()
-            if not response:
-                return {"error": "Reading list not found."}
-            response["books"] = []
 
-            cur.execute(
-                sql.SQL("""
-                    SELECT book_id FROM reading_list_books
-                        WHERE reading_list_id = %s AND NOT removed
-                        ORDER BY rank ASC
-                """), (reading_list_id,)
-            )
-            book_ids = cur.fetchall()
-            if not book_ids:
-                return {"error": "Could not fetch books from reading list."}
-            for book_id in book_ids:
-                book = db_queries.fetchBookByID(book_id["book_id"])
-                response["books"].append(book)
-
-    return response
 
 
 def updateListName(reading_list_id: str, name: str) -> bool:
+    '''
+    updateListName: Changes the name of the given reading list in the database.
+
+    :param reading_list_id: The id of the reading list, as a UUID.
+    :type reading_list_id: str
+    :param name: The new name for the reading list.
+    :type name: str
+    :return: Whether the operation succeeded.
+    :rtype: bool
+    '''
     try:
         with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
             with conn.cursor(row_factory=rows.dict_row) as cur:
@@ -200,6 +260,14 @@ def updateListName(reading_list_id: str, name: str) -> bool:
 
 
 def deleteList(reading_list_id: str) -> bool:
+    '''
+    deleteList: Deletes the given reading list from the database.
+
+    :param reading_list_id: The id of the reading list, as a UUID.
+    :type reading_list_id: str
+    :return: Whether the operation succeeded.
+    :rtype: bool
+    '''
     try:
         with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
             with conn.cursor(row_factory=rows.dict_row) as cur:
@@ -219,6 +287,16 @@ def deleteList(reading_list_id: str) -> bool:
 
 
 def deleteListBook(reading_list_id: str, book_id: int) -> bool:
+    '''
+    deleteList: Removes the given book from the reading list.
+
+    :param reading_list_id: The id of the reading list, as a UUID.
+    :type reading_list_id: str
+    :param book_id: The id of the book to remove.
+    :type book_id: int
+    :return: Whether the operation succeeded.
+    :rtype: bool
+    '''
     try:
         with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
             with conn.cursor(row_factory=rows.dict_row) as cur:
@@ -243,12 +321,15 @@ def semanticSearch(query: str, limit: int = 10, ids_to_search: set[int] | None =
     semanticSearch: Performs a semantic search for books matching the given query,
                     using the book embeddings table.
     
-    :param query: The query string to search for. This will be converted into an embedding and compared
-                  against the book embeddings in the database.
+    :param query: The query string to search for. This will be converted into an embedding
+                  and compared against the book embeddings in the database.
     :type query: str
     :param limit: The maximum number of results to return. Defaults to 10.
     :type limit: int
-    :return: A list of dictionaries, each containing the book's metadata.
+    :param ids_to_search: The set of valid ids to search, narrowed down by the keyword search.
+                          If not provided, we search the entire database.
+    :type ids_to_search: set[int] | None
+    :return: A list of dictionaries, each containing a book's metadata.
              The list is sorted in descending order of similarity.
     :rtype: list[dict[str, Any]]
     '''
@@ -309,6 +390,33 @@ def semanticSearch(query: str, limit: int = 10, ids_to_search: set[int] | None =
 
 def keywordSearch(query: str, limit: int = 10, ids_to_exclude: list[int] | None = None,
                   keywords: list[dict] | None = None) -> tuple[list[int], set[int], list[dict]]:
+    '''
+    semanticSearch: Performs a keyword search for books matching the given query,
+                    using an LLM hook to extract and weight valid keywords from the query.
+    
+    :param query: The query string to search for. This will be converted into an embedding
+                  and compared against the book embeddings in the database.
+    :type query: str
+    :param limit: The maximum number of results to return. Defaults to 10.
+    :type limit: int
+    :param ids_to_exclude: The set of ids to exclude from search, usually because they're
+                           already in the reading list. If not provided, we search the entire
+                           database.
+    :type ids_to_exclude: list[int] | None
+    :param keywords: A list of keyword dictionaries. If provided, we use this instead of the
+                     LLM extraction. Important for extending reading lists.
+    :type keywords: list[dict] | None
+    :return: A tuple of:
+
+                - A list of dictionaries, each containing a book's metadata, sorted in
+                  descending order of similarity.
+
+                - The set of remaining valid book IDs not excluded by mandatory or
+                  disqualifying keywords.
+                  
+                - The list of keyword dictionaries.
+    :rtype: tuple[list[int], set[int], list[dict]]
+    '''
     positive_keyword_weight = 1.0
     negative_keyword_weight = 1.0
 
@@ -347,11 +455,13 @@ def keywordSearch(query: str, limit: int = 10, ids_to_exclude: list[int] | None 
     # Note: If we have eliminated all possible books with hard tags, mandatory_ids will
     #       be empty, the same as if we had no mandatory tags. In this case, we 
     #       automagically ignore all mandatory tags while preserving disqualifying tags,
-    #       which is a decent fallback behaviour. You can't eliminate the entire
-    #       database with disqualifying tags without deliberately engineering that
-    #       situation.
+    #       which is a decent fallback behaviour.
     if not mandatory_ids:
-        mandatory_ids = set(db_queries.fetchAllIds())
+        mandatory_ids = set(db_queries.fetchAllIds()) - disqualified_ids
+
+    # If the list is still empty after this, then return the empty list
+    if not mandatory_ids:
+        return [], set(), keywords
 
     # We use a geometric progression for scoring soft keywords: The first positive hit
     # is worth 1 point, the second 1/2, the third 1/4, and so on. This reduces the impact
@@ -379,21 +489,25 @@ def keywordSearch(query: str, limit: int = 10, ids_to_exclude: list[int] | None 
 
 def generateReadingList(user_prompt: str, limit: int = 10,
                         ids_to_exclude: list[int] | None = None,
-                        keywords: list[dict] | None = None) -> str:
+                        keywords: list[dict] | None = None,
+                        extend_list_id: str | None = None) -> str:
     '''
-    generateReadingList: Fetches the top ten books matching the user's prompt to generate a reading list
+    generateReadingList: Fetches the top ten books matching the user's prompt to generate a 
+                         reading list, or the top five to extend an existing list.
     
     :param user_prompt: The user prompt
-    :type user_prompt: str
-    :param limit: The number of books to return, 
-    :type user_prompt: int
+    :type user_prompt: str    
     :param book_ids_to_exclude: Book ids to exclude from the search, typically becuase
-                                they have already been read, arealready in the reading
+                                they have already been read, are already in the reading
                                 list, or have been flagged as disliked.
     :type book_ids_to_exclude: list[int] | None
-    :return: A list of the top book ids in order of most to least fitting, based
-             on a combined score.
-    :rtype: list[int]
+    :param keywords: A list of keyword dictionaries. If provided, we use this instead of
+                     LLM extraction for keyword search. Important for extending reading lists.
+    :param extend_list_id: The UUID of the reading list we're extending, if any. If not
+                           provided, we create a new list.
+    :type keywords: list[dict] | None
+    :return: The UUID of the new or extended reading list.
+    :rtype: str
     '''
 
     user_id = 0
@@ -482,25 +596,42 @@ def generateReadingList(user_prompt: str, limit: int = 10,
     # Step 6: Save the results to the database
     with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
         with conn.cursor() as cur:
-            cur.execute(sql.SQL("""
-                INSERT INTO reading_lists (user_id, prompt, keywords)
-                VALUES (%s, %s, %s)                    
-                """), (user_id, user_prompt, json.dumps(keywords)))
-            cur.execute(sql.SQL("""
-                SELECT id 
-                    FROM reading_lists 
-                    WHERE user_id = %s
-                    ORDER BY updated_at DESC
-                    LIMIT 1     
-                """), (user_id,))
-            
-            reading_list_id_row = cur.fetchone()
-            if reading_list_id_row:
-                reading_list_id: str = str(reading_list_id_row[0])
+            if extend_list_id is None:
+                cur.execute(sql.SQL("""
+                    INSERT INTO reading_lists (user_id, prompt, keywords)
+                    VALUES (%s, %s, %s)                    
+                    """), (user_id, user_prompt, json.dumps(keywords)))
+                cur.execute(sql.SQL("""
+                    SELECT id 
+                        FROM reading_lists 
+                        WHERE user_id = %s
+                        ORDER BY updated_at DESC
+                        LIMIT 1     
+                    """), (user_id,))
+                
+                reading_list_id_row = cur.fetchone()
+                start = 1
+                if reading_list_id_row:
+                    reading_list_id: str = str(reading_list_id_row[0])
+                else:
+                    raise Exception("Failed to create reading list in database.")
             else:
-                raise Exception("Failed to create reading list in database.")
-            
-            for rank, id in enumerate(book_ids[:limit], start=1):
+                reading_list_id = extend_list_id
+                cur.execute(sql.SQL("""
+                SELECT rank
+                    FROM reading_list_books
+                    WHERE reading_list_id = %s
+                    ORDER BY rank DESC
+                    LIMIT 1     
+                """), (reading_list_id,))
+                max_rank_row = cur.fetchone()
+                if max_rank_row:
+                    start = 1 + max_rank_row[0]
+                else: # Somehow we have a reading list without books, so start from 1.
+                    start = 1
+
+
+            for rank, id in enumerate(book_ids[:limit], start=start):
                 cur.execute(sql.SQL("""
                     INSERT INTO reading_list_books (reading_list_id, book_id, rank)
                     VALUES (%s, %s, %s)                    
@@ -512,10 +643,12 @@ def generateReadingList(user_prompt: str, limit: int = 10,
 
 
 def main() -> None:
-    # Just a quick test to make sure everything is working end-to-end. "The Da Vinci Code"
-    # by Dan Brown, which we know is in the database, should be one of the top results
-    # of the test query, if we use that.
-    # test_string = "A tense thriller about people investigating ancient symbols in Renaissance artwork to discover a dark secret hidden by the Catholic church."
+    '''
+    main: The main entry point of the engine API.
+    
+    :return: None
+    :rtype: None
+    '''
     
     parser = argparse.ArgumentParser(description="Search engine for creating reading lists using hybrid keyword/semantic search.")
     subparsers = parser.add_subparsers(dest="command", required=True)
