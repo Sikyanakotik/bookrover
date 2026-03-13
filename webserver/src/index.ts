@@ -6,6 +6,7 @@ import process from 'node:process';
 dotenv.config()
 const app = express();
 const domain = process.env.BOOKROVER_DOMAIN;
+//const domain = "localhost"
 const port = process.env.WEBSERVER_PORT;
 const engine_port = process.env.ENGINE_PORT;
 
@@ -60,8 +61,6 @@ app.get("/status", (req, res) => {
 
 
 app.get("/", async (req, res) => {
-    // res.sendFile(path.join(import.meta.dirname, '../public/index.html'));
-
     const response = await fetch(`http://${domain}:${engine_port}/reading_lists`, {
         method: "GET",
         mode: "cors"
@@ -290,7 +289,7 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
                         list_name_edit_button.textContent = 'Edit name';
                         let query_uri = new URLSearchParams({reading_list_id: '${req.params.reading_list_id}',
                                                              name: list_name_label.textContent.trim()});
-                        fetch("http://${domain}:${port}/reading_lists/update_name?" + query_uri, {
+                        fetch("/reading_lists/update_name?" + query_uri, {
                             method: "PUT",
                             mode: "cors"
                         })
@@ -310,7 +309,7 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
                 list_delete_button.addEventListener('click', () => {
                     if (confirm("Delete this reading list? This cannot be undone.")) {
                         let query_uri = new URLSearchParams({reading_list_id: '${req.params.reading_list_id}'});
-                        fetch("http://${domain}:${port}/reading_lists?" + query_uri, {
+                        fetch("/reading_lists?" + query_uri, {
                             method: "DELETE",
                             mode: "cors"
                         }).then(response => {
@@ -381,7 +380,7 @@ app.get("/reading_lists/:reading_list_id", async (req, res) => {
                     if (confirm("Remove ${book.title} from this reading list? It will not be recommended again for this list. This cannot be undone.")) {
                         let query_uri = new URLSearchParams({reading_list_id: '${req.params.reading_list_id}',
                                                              book_id: '${book.id}'});
-                        fetch("http://${domain}:${port}/reading_lists/book?" + query_uri, {
+                        fetch("/reading_lists/book?" + query_uri, {
                             method: "DELETE",
                             mode: "cors"
                         }).then(response => {

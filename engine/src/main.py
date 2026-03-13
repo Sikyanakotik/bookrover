@@ -193,7 +193,8 @@ def runAsServer() -> None:
     :rtype: None
     '''
     port = int(loadenv.loadEnvVariable("ENGINE_PORT"))
-    server.run(port=port)
+    #server.run(port=port)
+    server.run(host='0.0.0.0', port=port, debug=False)
 
 
 def fetchReadingLists(user_id: int = 0) -> dict:

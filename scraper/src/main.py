@@ -1034,6 +1034,23 @@ def main() -> None:
                 print(f"Populating database with canonical genres.")
                 populateDatabase()
         case "background":
+            # First, check if the books table exists. If it doesn't, call reset_database
+            # to initialize the database.
+            with psycopg.connect(loadenv.getDatabaseConnectionString()) as conn:
+                with conn.cursor() as cur:
+                    query = sql.SQL(
+                        """
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_schema = 'public' AND table_name = 'books'
+                        );
+                        """)
+                    cur.execute(query)
+                    result = cur.fetchone() 
+                    if (not result) or (not result[0]):
+                        print("No books table found. Initializing database for first-time use.")
+                        reset_database()
+
             interval = args.interval
             print(f'Populating in background every {interval} minutes. Press Ctrl+C to stop.')
             while True:
