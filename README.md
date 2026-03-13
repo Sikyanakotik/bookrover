@@ -6,14 +6,14 @@ Docker Hub: https://hub.docker.com/r/sikyanakotik/bookrover
 
 ![Front page](/assets/Bookrover%20front%20page.png)
 
-## Purpose
+## Purpose and Motivation
 Bookrover is an RAG recommendation engine for novels, allowing users to create reading lists based on natural language query prompts, based on its database of book metadata scraped from [Hardcover](https://hardcover.app).
 
 It can be difficult to find new books that match what you want to read. Web searches, even LLM-assisted ones, rely on keywords that often can't capture the greater tones or themes of a book. Getting around this relies heavily on expert-curated lists that are outdated almost as soon as they're published, and can't fully grasp the greater landscape of fiction. Bookrover keeps a database of book data, updated regularly, and uses RAG search and semantic embedding to recommend books based on themes, mood, similarity to other works, and other qualities that are hard to capture with keywords and lists alone. It also allows users to curate their saved lists, rejecting inappropriate responses and extending lists with new recommendations. 
 
 Authors can also use this system find comparable titles for marketing their manuscripts to agents or publishers, or to keep an eye on the latest trends in a genre.
 
-## Docker Installation
+## Docker Installation (Quick Start)
 
 ### Prerequisites
 We recommend installing and running Bookrover via its Docker image. To do this, you will need Docker + Docker Compose already installed. You will also need:
@@ -85,7 +85,7 @@ Bookrover consists of four services:
 
 All services except ```scraper``` must be running simultaneously for the program to function.
 
-## Use
+## Usage
 The website is the primary interface to Bookrover. While you can interact with directly with the ```engine``` API using ```curl```, this is not recommended and will not be detailed here.
 
 Bookrover's website uses two primary views: the *front page* and the *reading list page*.
