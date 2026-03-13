@@ -4,7 +4,7 @@ RAG-powered fiction search engine.
 GitHub: https://github.com/sikyanakotik/bookrover  
 Docker Hub: https://hub.docker.com/r/sikyanakotik/bookrover
 
-![Front page](assets/Bookrover front page.png)
+![Front page](/assets/Bookrover%20front%20page.png)
 
 ## Purpose
 Bookrover is an RAG recommendation engine for novels, allowing users to create reading lists based on natural language query prompts, based on its database of book metadata scraped from [Hardcover](https://hardcover.app).
@@ -91,7 +91,7 @@ The website is the primary interface to Bookrover. While you can interact with d
 Bookrover's website uses two primary views: the *front page* and the *reading list page*.
 
 ### Front page
-![Front page](assets/Bookrover front page.png)
+![Front page](/assets/Bookrover%20front%20page.png)
 
 From the front page, you can generate new reading lists and view your existing lists. To create a new list, type your prompt in the query bar, then click the "Submit" button or press Enter. After the list is created, you will immediately be taken to its page. New lists are created with the ten most relevant books to the query, and are named "New List" by default. A list may have fewer than ten books if there are fewer than ten valid candidates.
 
@@ -104,7 +104,7 @@ When there are reading lists in the database, they will also be listed on this p
 You can return to the front page at any time by clicking on "Bookrover" in the title bar.
 
 ### Reading list page
-![Reading list page](assets/Bookrover list page.png)
+![Reading list page](assets/Bookrover%20list%20page.png)
 This page lists the contents of a reading list, along with the list's name, prompt, and time of creation. Each book includes the title, author, blurb description, and other relevant metadata. While this listing does not currently include direct links to Hardcover, the title, author, and description should be sufficient to find the book on Hardcover, Goodreads, or a retailer.
 
 You can rename the reading list with the "Edit name" button. Clicking this button makes the title field editable, and clicking it again or pressing Enter saves the change to the database. Reading list names do not have to be unique.
